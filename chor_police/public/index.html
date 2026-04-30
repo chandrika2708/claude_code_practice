@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chor Police 🚔</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    h1 { font-size: 2.2rem; margin-bottom: 6px; letter-spacing: 2px; }
+    .subtitle { color: #aaa; margin-bottom: 24px; font-size: 0.95rem; }
+
+    #join-screen {
+      text-align: center;
+    }
+    #join-screen input {
+      padding: 12px 20px;
+      font-size: 1.1rem;
+      border-radius: 8px;
+      border: 2px solid #444;
+      background: #16213e;
+      color: #fff;
+      outline: none;
+      width: 260px;
+    }
+    #join-screen input:focus { border-color: #e94560; }
+    #join-screen button {
+      display: block;
+      margin: 14px auto 0;
+      padding: 12px 40px;
+      font-size: 1.1rem;
+      background: #e94560;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #join-screen button:hover { background: #c73652; }
+
+    #game-screen { display: none; flex-direction: column; align-items: center; gap: 10px; }
+
+    #top-bar {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      width: 900px;
+      justify-content: space-between;
+    }
+    #role-badge {
+      font-size: 1.1rem;
+      font-weight: bold;
+      padding: 6px 18px;
+      border-radius: 20px;
+      background: #333;
+    }
+    #role-badge.police { background: #1565c0; }
+    #role-badge.chor   { background: #c62828; }
+    #role-badge.caught { background: #555; }
+
+    #players-list {
+      font-size: 0.85rem;
+      color: #aaa;
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .player-tag { padding: 3px 10px; border-radius: 12px; background: #222; }
+    .player-tag.police { color: #42a5f5; }
+    .player-tag.chor   { color: #ef5350; }
+    .player-tag.caught { color: #888; text-decoration: line-through; }
+
+    canvas {
+      border: 3px solid #333;
+      border-radius: 10px;
+      background: #0f3460;
+    }
+
+    #legend {
+      display: flex;
+      gap: 20px;
+      font-size: 0.82rem;
+      color: #aaa;
+    }
+    .legend-dot {
+      display: inline-block;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      font-size: 1.3rem;
+    }
+    #overlay.hidden { display: none; }
+    #overlay .big { font-size: 2rem; font-weight: bold; }
+    #overlay button {
+      padding: 10px 32px;
+      font-size: 1rem;
+      background: #e94560;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    #controls-hint {
+      font-size: 0.8rem;
+      color: #666;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="join-screen">
+  <h1>🚔 Chor Police</h1>
+  <p class="subtitle">Multiplayer — Catch the thieves or escape the police!</p>
+  <input id="name-input" type="text" maxlength="16" placeholder="Enter your name..." />
+  <button onclick="joinGame()">Join Game</button>
+  <p style="margin-top:18px; color:#666; font-size:0.85rem;">Share this page URL with friends to play together</p>
+</div>
+
+<div id="game-screen">
+  <div id="top-bar">
+    <div id="role-badge">Waiting...</div>
+    <div id="players-list"></div>
+  </div>
+  <canvas id="canvas" width="900" height="600"></canvas>
+  <div id="legend">
+    <span><span class="legend-dot" style="background:#42a5f5"></span>Police</span>
+    <span><span class="legend-dot" style="background:#ef5350"></span>Chor (free)</span>
+    <span><span class="legend-dot" style="background:#555"></span>Caught</span>
+    <span style="color:#a5d6a7">🟩 Jail (top-left)</span>
+    <span style="color:#ffe082">🟨 Free Zone (top-right) — touch to rescue jailed players</span>
+  </div>
+  <p id="controls-hint">Move: WASD or Arrow Keys</p>
+</div>
+
+<div id="overlay" class="hidden">
+  <div class="big" id="overlay-title"></div>
+  <div id="overlay-msg"></div>
+  <button onclick="requestRestart()">Play Again</button>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const W = 900, H = 600;
+  const RADIUS = 18;
+  const JAIL = { x: 20, y: 20, w: 140, h: 130 };
+  const FREE_ZONE = { x: W - 160, y: 20, w: 140, h: 130 };
+
+  const socket = io();
+  let myId = socket.id;
+  let myRole = 'waiting';
+  let gameState = null;
+  let keys = {};
+  let myName = '';
+
+  socket.on('connect', () => { myId = socket.id; });
+
+  function joinGame() {
+    const name = document.getElementById('name-input').value.trim();
+    if (!name) return;
+    myName = name;
+    document.getElementById('join-screen').style.display = 'none';
+    document.getElementById('game-screen').style.display = 'flex';
+    socket.emit('join', name);
+  }
+
+  document.getElementById('name-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') joinGame();
+  });
+
+  socket.on('started', data => {
+    hideOverlay();
+  });
+
+  socket.on('state', state => {
+    gameState = state;
+    const me = state.players.find(p => p.id === myId);
+    if (me) myRole = me.role;
+
+    updateRoleBadge();
+    updatePlayersList(state.players);
+    render(state);
+  });
+
+  socket.on('gameover', data => {
+    showOverlay(`🏆 ${data.winner} wins!`, 'All Chor caught! New game starting...');
+  });
+
+  function requestRestart() {
+    socket.emit('restart');
+    hideOverlay();
+  }
+
+  function showOverlay(title, msg) {
+    document.getElementById('overlay-title').textContent = title;
+    document.getElementById('overlay-msg').textContent = msg;
+    document.getElementById('overlay').classList.remove('hidden');
+  }
+
+  function hideOverlay() {
+    document.getElementById('overlay').classList.add('hidden');
+  }
+
+  function updateRoleBadge() {
+    const badge = document.getElementById('role-badge');
+    const labels = { police: '🚔 You are Police', chor: '🏃 You are Chor', caught: '🔒 Caught!', waiting: '⏳ Waiting...' };
+    badge.textContent = labels[myRole] || '⏳ Waiting...';
+    badge.className = myRole;
+  }
+
+  function updatePlayersList(players) {
+    const list = document.getElementById('players-list');
+    list.innerHTML = players.map(p =>
+      `<span class="player-tag ${p.role}">${p.name}</span>`
+    ).join('');
+  }
+
+  // Keyboard input
+  window.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    socket.emit('keys', keys);
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+  });
+  window.addEventListener('keyup', e => {
+    keys[e.key] = false;
+    socket.emit('keys', keys);
+  });
+
+  // Rendering
+  function render(state) {
+    ctx.clearRect(0, 0, W, H);
+
+    // Background grid
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+    for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+    // Jail zone
+    ctx.fillStyle = 'rgba(150, 50, 50, 0.25)';
+    ctx.strokeStyle = '#ef5350';
+    ctx.lineWidth = 2;
+    ctx.fillRect(JAIL.x, JAIL.y, JAIL.w, JAIL.h);
+    ctx.strokeRect(JAIL.x, JAIL.y, JAIL.w, JAIL.h);
+    ctx.fillStyle = '#ef5350';
+    ctx.font = 'bold 13px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillText('🔒 JAIL', JAIL.x + JAIL.w / 2, JAIL.y + JAIL.h / 2);
+
+    // Free zone
+    ctx.fillStyle = 'rgba(50, 150, 50, 0.25)';
+    ctx.strokeStyle = '#a5d6a7';
+    ctx.lineWidth = 2;
+    ctx.fillRect(FREE_ZONE.x, FREE_ZONE.y, FREE_ZONE.w, FREE_ZONE.h);
+    ctx.strokeRect(FREE_ZONE.x, FREE_ZONE.y, FREE_ZONE.w, FREE_ZONE.h);
+    ctx.fillStyle = '#a5d6a7';
+    ctx.font = 'bold 13px Segoe UI';
+    ctx.textAlign = 'center';
+    ctx.fillText('🤝 FREE ZONE', FREE_ZONE.x + FREE_ZONE.w / 2, FREE_ZONE.y + FREE_ZONE.h / 2);
+
+    // Players
+    state.players.forEach(p => {
+      const isMe = p.id === myId;
+      let color, borderColor;
+
+      if (p.role === 'police')      { color = '#1565c0'; borderColor = '#42a5f5'; }
+      else if (p.role === 'chor')   { color = '#c62828'; borderColor = '#ef5350'; }
+      else                          { color = '#444';    borderColor = '#888';    }
+
+      // Shadow for self
+      if (isMe) {
+        ctx.shadowColor = borderColor;
+        ctx.shadowBlur = 16;
+      }
+
+      // Circle
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = isMe ? 3 : 2;
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+
+      // Emoji icon
+      ctx.font = '16px serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(p.role === 'police' ? '🚔' : p.role === 'caught' ? '🔒' : '🏃', p.x, p.y + 5);
+
+      // Name label
+      ctx.font = `bold ${isMe ? 13 : 11}px Segoe UI`;
+      ctx.fillStyle = isMe ? '#fff' : '#ccc';
+      ctx.textAlign = 'center';
+      ctx.fillText(p.name, p.x, p.y - RADIUS - 6);
+    });
+
+    // Waiting message
+    if (!state.gameStarted) {
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(0, H/2 - 40, W, 80);
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 22px Segoe UI';
+      ctx.textAlign = 'center';
+      ctx.fillText(
+        state.players.length < 2
+          ? '⏳ Waiting for more players to join...'
+          : '🎮 Starting soon...',
+        W / 2, H / 2 + 8
+      );
+    }
+  }
+</script>
+</body>
+</html>
