@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <title>🎮 Games Hub</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#0d0d1a;color:#eee;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px}
+    h1{font-size:2.8rem;margin-bottom:6px;background:linear-gradient(90deg,#e94560,#f5a623,#7ed321,#4a90d9,#9013fe);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:3px}
+    .sub{color:#666;margin-bottom:40px;font-size:1rem}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;max-width:1000px;width:100%}
+    .card{background:#16213e;border:2px solid #222;border-radius:16px;padding:28px;text-align:center;cursor:pointer;transition:transform .2s,border-color .2s;text-decoration:none;color:#eee;display:block}
+    .card:hover{transform:translateY(-6px);border-color:#444}
+    .card .icon{font-size:3.5rem;margin-bottom:14px;display:block}
+    .card h2{font-size:1.3rem;margin-bottom:8px}
+    .card p{color:#888;font-size:0.88rem;line-height:1.5}
+    .card .tag{display:inline-block;margin-top:12px;padding:4px 12px;border-radius:12px;font-size:0.78rem;font-weight:bold}
+    .bomb .card:hover{border-color:#ef5350} .bomb .tag{background:#c62828;color:#fff}
+    .coins .card:hover{border-color:#ffd740} .coins .tag{background:#f9a825;color:#000}
+    .zombie .card:hover{border-color:#66bb6a} .zombie .tag{background:#2e7d32;color:#fff}
+    .king .card:hover{border-color:#ce93d8} .king .tag{background:#6a1b9a;color:#fff}
+    .shooter .card:hover{border-color:#42a5f5} .shooter .tag{background:#0d47a1;color:#fff}
+    footer{margin-top:40px;color:#333;font-size:0.8rem}
+  </style>
+</head>
+<body>
+  <h1>🎮 GAMES HUB</h1>
+  <p class="sub">Pick a game — everyone on the same WiFi can join!</p>
+  <div class="grid">
+    <div class="bomb"><a class="card" href="/bomb.html">
+      <span class="icon">💣</span>
+      <h2>Bomb Tag</h2>
+      <p>Touch others to pass the hot bomb before it explodes. Last player alive wins!</p>
+      <span class="tag">2–10 players</span>
+    </a></div>
+    <div class="coins"><a class="card" href="/coins.html">
+      <span class="icon">🪙</span>
+      <h2>Coin Rush</h2>
+      <p>Race to collect gold coins. Bump into others to steal their loot. Most coins in 60s wins!</p>
+      <span class="tag">2–10 players</span>
+    </a></div>
+    <div class="zombie"><a class="card" href="/zombie.html">
+      <span class="icon">🧟</span>
+      <h2>Zombie Apocalypse</h2>
+      <p>One zombie infects everyone it touches. Humans must survive 90 seconds!</p>
+      <span class="tag">2–10 players</span>
+    </a></div>
+    <div class="king"><a class="card" href="/king.html">
+      <span class="icon">👑</span>
+      <h2>King of the Hill</h2>
+      <p>Stand in the glowing center zone to score. Push others out. First to 60 points wins!</p>
+      <span class="tag">2–10 players</span>
+    </a></div>
+    <div class="shooter"><a class="card" href="/shooter.html">
+      <span class="icon">🚀</span>
+      <h2>Space Shooter</h2>
+      <p>Fly your ship and blast enemies with lasers. 3 HP each — last ship standing wins!</p>
+      <span class="tag">2–10 players · Space to shoot</span>
+    </a></div>
+  </div>
+  <footer>Move with WASD or Arrow Keys &nbsp;·&nbsp; Best on desktop/laptop</footer>
+</body>
+</html>

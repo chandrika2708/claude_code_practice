@@ -1,0 +1,151 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><title>🧟 Zombie Apocalypse</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a120a;color:#eee;font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh}
+#join{text-align:center}#join h1{font-size:2rem;margin-bottom:8px}#join p{color:#888;margin-bottom:20px}
+input{padding:10px 18px;font-size:1rem;border-radius:8px;border:2px solid #333;background:#111;color:#fff;outline:none;width:240px}
+input:focus{border-color:#66bb6a}
+button{display:block;margin:12px auto 0;padding:10px 36px;font-size:1rem;background:#388e3c;color:#fff;border:none;border-radius:8px;cursor:pointer}
+#game{display:none;flex-direction:column;align-items:center;gap:8px}
+#bar{display:flex;justify-content:space-between;align-items:center;width:900px}
+#timer-box{font-size:1.2rem;font-weight:bold;color:#66bb6a}
+#counts{display:flex;gap:16px;font-size:0.85rem}
+canvas{border-radius:10px}#hint{font-size:0.78rem;color:#444}
+#ov{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font-size:1.2rem}
+#ov.h{display:none}#ov .big{font-size:2.2rem;font-weight:bold}#ov .cd{font-size:4rem;font-weight:bold;color:#66bb6a}
+#ov button{padding:10px 30px;background:#388e3c;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:1rem}
+</style></head><body>
+<div id="join"><h1>🧟 Zombie Apocalypse</h1><p>Humans survive 90 seconds. One zombie infects all!</p>
+<input id="ni" maxlength="14" placeholder="Your name..."/>
+<button onclick="join()">Join Game</button>
+<p id="fm" style="color:#66bb6a;margin-top:10px;display:none">Game is full!</p></div>
+
+<div id="game"><div id="bar">
+  <div id="timer-box">⏱ 90s</div>
+  <div id="counts"><span id="hcount">🧑 0 Humans</span><span id="zcount">🧟 0 Zombies</span></div>
+</div>
+<canvas id="c" width="900" height="600"></canvas>
+<div id="hint">WASD / Arrow Keys · Humans: run! Zombies: infect!</div></div>
+
+<div id="ov"><div class="big" id="ot"></div><div id="om"></div><div class="cd" id="ocd"></div>
+<button id="ob" onclick="restart()" style="display:none">Play Again</button></div>
+
+<script src="/socket.io/socket.io.js"></script><script src="shared.js"></script>
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const W=900,H=600,R=20;
+const socket=io('/zombie');
+let myId=socket.id,state=null,keys={};
+let particles=new Particles(),floats=new FloatText();
+let infectedFlash={};
+let fog=Array.from({length:12},()=>({x:Math.random()*W,y:Math.random()*H,r:60+Math.random()*80,vx:(Math.random()-.5)*.2,vy:(Math.random()-.5)*.2,a:Math.random()*.08+.02}));
+
+socket.on('connect',()=>myId=socket.id);
+socket.on('full',()=>document.getElementById('fm').style.display='block');
+socket.on('countdown',n=>{SFX.countdown();showOv('🧟 Game starting in...',`${state?.players?.length||'?'} players`,n,false);});
+socket.on('started',d=>{hideOv();SFX.go();SFX.groan();});
+socket.on('infected',d=>{
+  SFX.infect();shake(10);
+  particles.ring(d.x,d.y,20,'#66bb6a',40);
+  particles.emit(d.x,d.y,15,['#2e7d32','#66bb6a','#a5d6a7'],6);
+  floats.add(d.x,d.y-30,'🧟 INFECTED!','#66bb6a',18);
+  infectedFlash[d.id]={t:1};
+});
+socket.on('state',s=>{state=s;updateUI();});
+socket.on('gameover',d=>{SFX.win();showOv(d.winner,'','' ,true);});
+
+function join(){const n=document.getElementById('ni').value.trim();if(!n)return;document.getElementById('join').style.display='none';document.getElementById('game').style.display='flex';socket.emit('join',n);}
+document.getElementById('ni').onkeydown=e=>{if(e.key==='Enter')join();};
+window.onkeydown=e=>{keys[e.key]=true;socket.emit('keys',keys);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();};
+window.onkeyup=e=>{keys[e.key]=false;socket.emit('keys',keys);};
+function restart(){socket.emit('restart');hideOv();}
+function showOv(t,m,cd,btn){document.getElementById('ot').textContent=t;document.getElementById('om').textContent=m;document.getElementById('ocd').textContent=cd;document.getElementById('ob').style.display=btn?'block':'none';document.getElementById('ov').classList.remove('h');}
+function hideOv(){document.getElementById('ov').classList.add('h');}
+function updateUI(){
+  if(!state)return;
+  document.getElementById('timer-box').textContent='⏱ '+state.gameTime+'s';
+  const humans=state.players.filter(p=>p.role==='human').length;
+  const zombies=state.players.filter(p=>p.role==='zombie').length;
+  document.getElementById('hcount').textContent='🧑 '+humans+' Human'+(humans!==1?'s':'');
+  document.getElementById('zcount').textContent='🧟 '+zombies+' Zombie'+(zombies!==1?'s':'');
+}
+
+function drawZombie(x,y,isMe,name){
+  const pulse=Math.sin(Date.now()/300)*4;
+  ctx.shadowColor='#4caf50';ctx.shadowBlur=12+pulse;
+  ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);
+  const g=ctx.createRadialGradient(x,y,2,x,y,R);
+  g.addColorStop(0,'#4caf50');g.addColorStop(1,'#1b5e20');
+  ctx.fillStyle=g;ctx.fill();
+  ctx.strokeStyle=isMe?'#fff':'#a5d6a7';ctx.lineWidth=isMe?3:1.5;ctx.stroke();
+  ctx.shadowBlur=0;
+  ctx.font='15px serif';ctx.textAlign='center';ctx.fillText('🧟',x,y+6);
+  ctx.font=`bold ${isMe?12:10}px Segoe UI`;ctx.fillStyle=isMe?'#fff':'#a5d6a7';ctx.fillText(name,x,y-R-5);
+}
+function drawHuman(x,y,isMe,name,flash){
+  if(flash>0){ctx.shadowColor='#4caf50';ctx.shadowBlur=20;}
+  else if(isMe){ctx.shadowColor='#90caf9';ctx.shadowBlur=14;}
+  ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);
+  ctx.fillStyle=flash>0?`rgba(102,187,106,${flash})`:isMe?'#1565c0':'#0d47a1';
+  ctx.fill();
+  ctx.strokeStyle=isMe?'#fff':'#90caf9';ctx.lineWidth=isMe?3:1.5;ctx.stroke();
+  ctx.shadowBlur=0;
+  ctx.font='15px serif';ctx.textAlign='center';ctx.fillText('🧑',x,y+6);
+  ctx.font=`bold ${isMe?12:10}px Segoe UI`;ctx.fillStyle=isMe?'#fff':'#90caf9';ctx.fillText(name,x,y-R-5);
+}
+
+let t=0;
+function loop(){
+  t++;
+  ctx.save();
+  ctx.fillStyle='#0a120a';ctx.fillRect(0,0,W,H);
+  // Fog
+  fog.forEach(f=>{
+    f.x+=f.vx;f.y+=f.vy;
+    if(f.x<-f.r)f.x=W+f.r;if(f.x>W+f.r)f.x=-f.r;
+    if(f.y<-f.r)f.y=H+f.r;if(f.y>H+f.r)f.y=-f.r;
+    ctx.fillStyle=`rgba(20,80,20,${f.a})`;
+    ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,Math.PI*2);ctx.fill();
+  });
+  // Grid
+  ctx.strokeStyle='rgba(50,150,50,.04)';ctx.lineWidth=1;
+  for(let x=0;x<W;x+=50){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<H;y+=50){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  applyShake(ctx);
+  particles.update();particles.draw(ctx);
+
+  if(state){
+    // Heartbeat line for last human
+    const humans=state.players.filter(p=>p.role==='human');
+    if(humans.length===1&&state.started){
+      const hb=Math.sin(t*.2)*2;
+      ctx.strokeStyle='rgba(244,67,54,.4)';ctx.lineWidth=2;
+      ctx.beginPath();
+      for(let x=0;x<W;x+=5)ctx.lineTo(x,H-20+Math.sin(x*.1+t*.15)*4*hb);
+      ctx.stroke();
+    }
+    state.players.forEach(p=>{
+      const isMe=p.id===myId;
+      const fl=infectedFlash[p.id];
+      if(fl){fl.t=Math.max(0,fl.t-.03);if(fl.t<=0)delete infectedFlash[p.id];}
+      if(p.role==='zombie')drawZombie(p.x,p.y,isMe,p.name);
+      else if(p.role==='human')drawHuman(p.x,p.y,isMe,p.name,fl?fl.t:0);
+      else{ctx.fillStyle='#333';ctx.beginPath();ctx.arc(p.x,p.y,R,0,Math.PI*2);ctx.fill();ctx.font='11px Segoe UI';ctx.fillStyle='#666';ctx.textAlign='center';ctx.fillText(p.name,p.x,p.y+4);}
+    });
+    const me=state.players.find(p=>p.id===myId);
+    if(me){
+      const badge=document.querySelector('#bar #timer-box');
+      if(me.role==='zombie')badge.style.color='#66bb6a';
+      else badge.style.color=state.gameTime<=20?'#ef5350':'#90caf9';
+    }
+  }
+  floats.update();floats.draw(ctx);
+  if(state&&!state.started){
+    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(0,H/2-35,W,70);
+    ctx.fillStyle='#fff';ctx.font='bold 20px Segoe UI';ctx.textAlign='center';
+    ctx.fillText(state.players.length<2?'⏳ Waiting for players...':'👥 '+state.players.length+' players ready',W/2,H/2+8);
+  }
+  ctx.restore();requestAnimationFrame(loop);
+}
+loop();
+</script></body></html>

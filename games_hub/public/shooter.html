@@ -1,0 +1,141 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><title>🚀 Space Shooter</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;color:#eee;font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh}
+#join{text-align:center}#join h1{font-size:2rem;margin-bottom:8px}#join p{color:#888;margin-bottom:20px}
+input{padding:10px 18px;font-size:1rem;border-radius:8px;border:2px solid #333;background:#111;color:#fff;outline:none;width:240px}
+input:focus{border-color:#42a5f5}
+button{display:block;margin:12px auto 0;padding:10px 36px;font-size:1rem;background:#0d47a1;color:#fff;border:none;border-radius:8px;cursor:pointer}
+#game{display:none;flex-direction:column;align-items:center;gap:8px}
+#bar{display:flex;justify-content:space-between;align-items:center;width:900px;flex-wrap:wrap;gap:6px}
+.hprow{display:flex;align-items:center;gap:6px;font-size:0.82rem;background:#0d0d1a;padding:4px 10px;border-radius:10px}
+canvas{border-radius:10px}#hint{font-size:0.78rem;color:#444}
+#ov{position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font-size:1.2rem}
+#ov.h{display:none}#ov .big{font-size:2.2rem;font-weight:bold}#ov .cd{font-size:4rem;font-weight:bold;color:#42a5f5}
+#ov button{padding:10px 30px;background:#0d47a1;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:1rem}
+</style></head><body>
+<div id="join"><h1>🚀 Space Shooter</h1><p>Blast your enemies with lasers. 3 HP each — last alive wins!</p>
+<input id="ni" maxlength="14" placeholder="Your name..."/>
+<button onclick="join()">Join Game</button>
+<p id="fm" style="color:#42a5f5;margin-top:10px;display:none">Game is full!</p></div>
+
+<div id="game">
+<div id="bar" id="hpbar"></div>
+<canvas id="c" width="900" height="600"></canvas>
+<div id="hint">WASD to move · Space / F to shoot in movement direction</div></div>
+
+<div id="ov"><div class="big" id="ot"></div><div id="om"></div><div class="cd" id="ocd"></div>
+<button id="ob" onclick="restart()" style="display:none">Play Again</button></div>
+
+<script src="/socket.io/socket.io.js"></script><script src="shared.js"></script>
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const W=900,H=600,R=18;
+const socket=io('/shooter');
+let myId=socket.id,state=null,keys={};
+let particles=new Particles(),floats=new FloatText();
+let stars=makeStars(120,W,H);
+let hitFlash={};
+let laserTrails=[];
+let t=0;
+
+socket.on('connect',()=>myId=socket.id);
+socket.on('full',()=>document.getElementById('fm').style.display='block');
+socket.on('countdown',n=>{SFX.countdown();showOv('🚀 Game starting in...',`${state?.players?.length||'?'} players`,n,false);});
+socket.on('started',()=>{hideOv();SFX.go();});
+socket.on('shot',d=>{SFX.shoot();laserTrails.push({x:d.x,y:d.y,angle:d.angle,color:d.color,life:1});});
+socket.on('hit',d=>{SFX.hit();hitFlash[d.id]={t:1};shake(5);floats.add(d.x,d.y-30,'-1 HP','#ef5350',15);});
+socket.on('died',d=>{SFX.die();shake(14);particles.emit(d.x,d.y,40,['#ef5350','#ff9800','#fff','#ffeb3b'],9,0.15);floats.add(d.x,d.y-40,'💥 DESTROYED!','#ff5722',20);});
+socket.on('state',s=>{state=s;updateUI();});
+socket.on('gameover',d=>{SFX.win();showOv('🏆 '+d.winner+' wins!','Last ship standing!','',true);});
+
+function join(){const n=document.getElementById('ni').value.trim();if(!n)return;document.getElementById('join').style.display='none';document.getElementById('game').style.display='flex';socket.emit('join',n);}
+document.getElementById('ni').onkeydown=e=>{if(e.key==='Enter')join();};
+window.onkeydown=e=>{keys[e.key]=true;socket.emit('keys',keys);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();};
+window.onkeyup=e=>{keys[e.key]=false;socket.emit('keys',keys);};
+function restart(){socket.emit('restart');hideOv();}
+function showOv(t,m,cd,btn){document.getElementById('ot').textContent=t;document.getElementById('om').textContent=m;document.getElementById('ocd').textContent=cd;document.getElementById('ob').style.display=btn?'block':'none';document.getElementById('ov').classList.remove('h');}
+function hideOv(){document.getElementById('ov').classList.add('h');}
+function updateUI(){
+  if(!state)return;
+  const bar=document.getElementById('bar');
+  bar.innerHTML=state.players.map(p=>`<div class="hprow" style="border-left:3px solid ${p.color}">${p.name}: ${'❤️'.repeat(p.hp)}${'🖤'.repeat(Math.max(0,3-p.hp))}${!p.alive?' 💀':''}</div>`).join('');
+}
+
+function drawShip(x,y,angle,color,isMe,alive){
+  ctx.save();ctx.translate(x,y);ctx.rotate(angle+Math.PI/2);
+  if(!alive){ctx.globalAlpha=0.2;}
+  if(isMe){ctx.shadowColor=color;ctx.shadowBlur=16;}
+  ctx.beginPath();ctx.moveTo(0,-R);ctx.lineTo(R*.7,R*.8);ctx.lineTo(0,R*.4);ctx.lineTo(-R*.7,R*.8);ctx.closePath();
+  ctx.fillStyle=color;ctx.fill();
+  ctx.strokeStyle=isMe?'#fff':'rgba(255,255,255,.3)';ctx.lineWidth=isMe?2:1;ctx.stroke();
+  ctx.shadowBlur=0;
+  if(isMe&&alive){
+    const thrust=Math.sin(Date.now()*.02)*.3+.7;
+    ctx.beginPath();ctx.moveTo(-R*.3,R*.4);ctx.lineTo(0,R*.9+thrust*8);ctx.lineTo(R*.3,R*.4);ctx.fillStyle=`rgba(255,152,0,${thrust})`;ctx.fill();
+  }
+  ctx.restore();
+}
+
+function loop(){
+  t++;
+  ctx.save();
+  ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+  // Stars with twinkle
+  stars.forEach((s,i)=>{
+    const tw=Math.sin(t*.02+i)*.2+.8;
+    ctx.fillStyle=`rgba(255,255,255,${s.b*tw})`;
+    ctx.fillRect(s.x,s.y,s.r,s.r);
+  });
+  applyShake(ctx);
+
+  // Laser trails
+  laserTrails=laserTrails.filter(l=>{
+    l.life-=0.08;
+    if(l.life<=0)return false;
+    ctx.save();ctx.globalAlpha=l.life;
+    ctx.strokeStyle=l.color;ctx.lineWidth=3;ctx.shadowColor=l.color;ctx.shadowBlur=8;
+    ctx.beginPath();
+    ctx.moveTo(l.x,l.y);
+    ctx.lineTo(l.x+Math.cos(l.angle)*60,l.y+Math.sin(l.angle)*60);
+    ctx.stroke();ctx.restore();
+    return true;
+  });
+
+  // Bullets
+  if(state){
+    state.bullets.forEach(b=>{
+      ctx.save();
+      ctx.shadowColor=b.color;ctx.shadowBlur=10;
+      ctx.fillStyle=b.color;
+      ctx.beginPath();ctx.arc(b.x,b.y,5,0,Math.PI*2);ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  particles.update();particles.draw(ctx);
+
+  if(state){
+    state.players.forEach(p=>{
+      const isMe=p.id===myId;
+      const fl=hitFlash[p.id];
+      if(fl){fl.t=Math.max(0,fl.t-.06);if(fl.t<=0)delete hitFlash[p.id];}
+      if(fl&&fl.t>0){ctx.save();ctx.globalAlpha=fl.t*.8;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(p.x,p.y,R+6,0,Math.PI*2);ctx.fill();ctx.restore();}
+      drawShip(p.x,p.y,p.angle,p.color,isMe,p.alive);
+      ctx.font=`bold ${isMe?12:10}px Segoe UI`;ctx.fillStyle=isMe?'#fff':'#aaa';ctx.textAlign='center';
+      ctx.fillText(p.name,p.x,p.y-R-8);
+      if(p.alive&&state.started){
+        ctx.font='11px serif';ctx.fillText('❤️'.repeat(p.hp),p.x,p.y+R+14);
+      }
+    });
+  }
+  floats.update();floats.draw(ctx);
+  if(state&&!state.started){
+    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(0,H/2-35,W,70);
+    ctx.fillStyle='#fff';ctx.font='bold 20px Segoe UI';ctx.textAlign='center';
+    ctx.fillText(state.players.length<2?'⏳ Waiting for players...':'👥 '+state.players.length+' players ready',W/2,H/2+8);
+  }
+  ctx.restore();requestAnimationFrame(loop);
+}
+loop();
+</script></body></html>

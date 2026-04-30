@@ -1,0 +1,128 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><title>👑 King of the Hill</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#120a1a;color:#eee;font-family:'Segoe UI',sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh}
+#join{text-align:center}#join h1{font-size:2rem;margin-bottom:8px}#join p{color:#888;margin-bottom:20px}
+input{padding:10px 18px;font-size:1rem;border-radius:8px;border:2px solid #333;background:#111;color:#fff;outline:none;width:240px}
+input:focus{border-color:#ce93d8}
+button{display:block;margin:12px auto 0;padding:10px 36px;font-size:1rem;background:#6a1b9a;color:#fff;border:none;border-radius:8px;cursor:pointer}
+#game{display:none;flex-direction:column;align-items:center;gap:8px}
+#bar{display:flex;justify-content:space-between;align-items:center;width:900px}
+#plist{display:flex;gap:8px;flex-wrap:wrap;font-size:0.8rem}
+.pt{padding:2px 10px;border-radius:10px;background:#1a0d2a}
+canvas{border-radius:10px}#hint{font-size:0.78rem;color:#444}
+#ov{position:fixed;inset:0;background:rgba(0,0,0,.82);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font-size:1.2rem}
+#ov.h{display:none}#ov .big{font-size:2.2rem;font-weight:bold}#ov .cd{font-size:4rem;font-weight:bold;color:#ce93d8}
+#ov button{padding:10px 30px;background:#6a1b9a;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:1rem}
+</style></head><body>
+<div id="join"><h1>👑 King of the Hill</h1><p>Stand in the center zone to score. Push others out. First to 60 wins!</p>
+<input id="ni" maxlength="14" placeholder="Your name..."/>
+<button onclick="join()">Join Game</button>
+<p id="fm" style="color:#ce93d8;margin-top:10px;display:none">Game is full!</p></div>
+
+<div id="game"><div id="bar">
+  <div style="font-size:1rem;color:#ce93d8;font-weight:bold">👑 King of the Hill — First to 60 pts</div>
+  <div id="plist"></div>
+</div>
+<canvas id="c" width="900" height="600"></canvas>
+<div id="hint">WASD / Arrow Keys · Stand in the center zone · Bump others out!</div></div>
+
+<div id="ov"><div class="big" id="ot"></div><div id="om"></div><div class="cd" id="ocd"></div>
+<button id="ob" onclick="restart()" style="display:none">Play Again</button></div>
+
+<script src="/socket.io/socket.io.js"></script><script src="shared.js"></script>
+<script>
+const canvas=document.getElementById('c'),ctx=canvas.getContext('2d');
+const W=900,H=600,R=20,WIN=60;
+const socket=io('/king');
+let myId=socket.id,state=null,keys={};
+let particles=new Particles(),floats=new FloatText();
+let t=0,kingColor='#ce93d8';
+
+socket.on('connect',()=>myId=socket.id);
+socket.on('full',()=>document.getElementById('fm').style.display='block');
+socket.on('countdown',n=>{SFX.countdown();showOv('👑 Game starting in...',`${state?.players?.length||'?'} players`,n,false);});
+socket.on('started',()=>{hideOv();SFX.go();});
+socket.on('push',d=>{SFX.push();particles.emit(d.x,d.y,8,['#ce93d8','#fff'],3);});
+socket.on('state',s=>{
+  state=s;
+  const inZone=s.players.filter(p=>p.inZone);
+  kingColor=inZone.length===1?inZone[0].color:inZone.length>1?'#fff':'rgba(180,100,220,.5)';
+  const leader=s.players.reduce((a,b)=>b.score>a.score?b:a,{score:-1});
+  if(leader.score>0&&state.started){const prev=window._lastScore||{};if(prev[leader.id]!==Math.floor(leader.score)&&Math.floor(leader.score)%5===0){SFX.score();window._lastScore=window._lastScore||{};window._lastScore[leader.id]=Math.floor(leader.score);}}
+  updateUI();
+});
+socket.on('gameover',d=>{SFX.win();showOv('👑 '+d.winner+' wins!','Claimed the throne!','',true);});
+
+function join(){const n=document.getElementById('ni').value.trim();if(!n)return;document.getElementById('join').style.display='none';document.getElementById('game').style.display='flex';socket.emit('join',n);}
+document.getElementById('ni').onkeydown=e=>{if(e.key==='Enter')join();};
+window.onkeydown=e=>{keys[e.key]=true;socket.emit('keys',keys);if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key))e.preventDefault();};
+window.onkeyup=e=>{keys[e.key]=false;socket.emit('keys',keys);};
+function restart(){socket.emit('restart');hideOv();}
+function showOv(t,m,cd,btn){document.getElementById('ot').textContent=t;document.getElementById('om').textContent=m;document.getElementById('ocd').textContent=cd;document.getElementById('ob').style.display=btn?'block':'none';document.getElementById('ov').classList.remove('h');}
+function hideOv(){document.getElementById('ov').classList.add('h');}
+function updateUI(){
+  if(!state)return;
+  const sorted=[...state.players].sort((a,b)=>b.score-a.score);
+  document.getElementById('plist').innerHTML=sorted.map(p=>`<span class="pt" style="color:${p.color}">${p.name}: ${Math.floor(p.score)}/${WIN}</span>`).join('');
+}
+
+function drawZone(zone,r,color){
+  const pulse=Math.sin(t*.04)*8;
+  const grad=ctx.createRadialGradient(zone.x,zone.y,0,zone.x,zone.y,r+pulse);
+  grad.addColorStop(0,color.replace(')',',0.35)').replace('rgb','rgba').replace('#','rgba('+parseInt(color.slice(1,3),16)+','+parseInt(color.slice(3,5),16)+','+parseInt(color.slice(5,7),16)+','));
+  // Simpler approach:
+  ctx.beginPath();ctx.arc(zone.x,zone.y,r+pulse,0,Math.PI*2);
+  ctx.fillStyle=`rgba(180,100,220,0.12)`;ctx.fill();
+  ctx.strokeStyle=kingColor;ctx.lineWidth=3;ctx.setLineDash([10,6]);ctx.stroke();ctx.setLineDash([]);
+  // Inner glow ring
+  ctx.beginPath();ctx.arc(zone.x,zone.y,r*.5+pulse*.3,0,Math.PI*2);
+  ctx.strokeStyle=`rgba(206,147,216,0.2)`;ctx.lineWidth=40;ctx.stroke();
+  ctx.lineWidth=1;
+  ctx.font='bold 18px Segoe UI';ctx.textAlign='center';ctx.fillStyle='rgba(206,147,216,0.5)';
+  ctx.fillText('👑 THRONE',zone.x,zone.y+6);
+}
+
+function loop(){
+  t++;
+  ctx.save();
+  ctx.fillStyle='#120a1a';ctx.fillRect(0,0,W,H);
+  // Stone tile bg
+  ctx.strokeStyle='rgba(100,60,150,.06)';ctx.lineWidth=1;
+  for(let x=0;x<W;x+=45){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,H);ctx.stroke();}
+  for(let y=0;y<H;y+=45){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  applyShake(ctx);
+  particles.update();particles.draw(ctx);
+
+  if(state){
+    drawZone(state.zone,state.zoneR,kingColor);
+    const leader=state.players.reduce((a,b)=>b.score>a.score?b:a,{score:-1,name:''});
+    state.players.forEach(p=>{
+      const isMe=p.id===myId;
+      const isLeader=p.name===leader.name&&p.score>0;
+      if(isMe){ctx.shadowColor=p.color;ctx.shadowBlur=14;}
+      else if(p.inZone){ctx.shadowColor=p.color;ctx.shadowBlur=8;}
+      ctx.beginPath();ctx.arc(p.x,p.y,R,0,Math.PI*2);
+      ctx.fillStyle=p.inZone?p.color:p.color+'99';ctx.fill();
+      ctx.strokeStyle=isMe?'#fff':p.inZone?'#fff':'rgba(255,255,255,.2)';ctx.lineWidth=isMe?3:2;ctx.stroke();
+      ctx.shadowBlur=0;
+      ctx.font='14px serif';ctx.textAlign='center';ctx.fillText(isLeader?'👑':'😤',p.x,p.y+5);
+      ctx.font=`bold ${isMe?12:10}px Segoe UI`;ctx.fillStyle=isMe?'#fff':'#ccc';
+      ctx.fillText(p.name,p.x,p.y-R-5);
+      // Score bar
+      const bw=50,bh=5,bx=p.x-bw/2,by=p.y+R+8;
+      ctx.fillStyle='#333';ctx.fillRect(bx,by,bw,bh);
+      ctx.fillStyle=p.color;ctx.fillRect(bx,by,bw*(p.score/WIN),bh);
+      ctx.font='bold 10px Segoe UI';ctx.fillStyle='#ccc';ctx.fillText(Math.floor(p.score),p.x,by+bh+10);
+    });
+  }
+  floats.update();floats.draw(ctx);
+  if(state&&!state.started){
+    ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(0,H/2-35,W,70);
+    ctx.fillStyle='#fff';ctx.font='bold 20px Segoe UI';ctx.textAlign='center';
+    ctx.fillText(state.players.length<2?'⏳ Waiting for players...':'👥 '+state.players.length+' players ready',W/2,H/2+8);
+  }
+  ctx.restore();requestAnimationFrame(loop);
+}
+loop();
+</script></body></html>
