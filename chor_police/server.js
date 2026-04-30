@@ -10,7 +10,8 @@ app.use(express.static('public'));
 
 const W = 900, H = 600;
 const RADIUS = 18;
-const SPEED = 4;
+const POLICE_SPEED = 6;
+const CHOR_SPEED = 3;
 const MAX_PLAYERS = 10;
 const JAIL = { x: 20, y: 20, w: 140, h: 130 };
 const FREE_ZONE = { x: W - 160, y: 20, w: 140, h: 130 };
@@ -38,9 +39,8 @@ function randomSpawn() {
 }
 
 function policeCount(total) {
-  if (total <= 4) return 1;
-  if (total <= 7) return 2;
-  return 3;
+  // 1 police for every 5 chor
+  return Math.max(1, Math.floor(total / 6));
 }
 
 function startCountdown() {
@@ -159,10 +159,11 @@ setInterval(() => {
   // Move players
   Object.values(players).forEach(p => {
     if (p.role === 'caught') return;
-    if (p.keys['ArrowUp']    || p.keys['w']) p.y = Math.max(RADIUS, p.y - SPEED);
-    if (p.keys['ArrowDown']  || p.keys['s']) p.y = Math.min(H - RADIUS, p.y + SPEED);
-    if (p.keys['ArrowLeft']  || p.keys['a']) p.x = Math.max(RADIUS, p.x - SPEED);
-    if (p.keys['ArrowRight'] || p.keys['d']) p.x = Math.min(W - RADIUS, p.x + SPEED);
+    const spd = p.role === 'police' ? POLICE_SPEED : CHOR_SPEED;
+    if (p.keys['ArrowUp']    || p.keys['w']) p.y = Math.max(RADIUS, p.y - spd);
+    if (p.keys['ArrowDown']  || p.keys['s']) p.y = Math.min(H - RADIUS, p.y + spd);
+    if (p.keys['ArrowLeft']  || p.keys['a']) p.x = Math.max(RADIUS, p.x - spd);
+    if (p.keys['ArrowRight'] || p.keys['d']) p.x = Math.min(W - RADIUS, p.x + spd);
   });
 
   // Each police catches free Chor
