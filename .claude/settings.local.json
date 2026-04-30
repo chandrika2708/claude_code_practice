@@ -9,7 +9,13 @@
       "PowerShell(npm *)",
       "PowerShell(New-Item *)",
       "PowerShell(npm install *)",
-      "PowerShell(Set-ExecutionPolicy *)"
+      "PowerShell(Set-ExecutionPolicy *)",
+      "PowerShell($env:PATH += \";C:\\\\Program Files\\\\nodejs\"; cd \"D:\\\\claudai_code\\\\claude_code_practice\\\\chor_police\"; Start-Process powershell -ArgumentList \"-NoExit\", \"-Command\", \"`$env:PATH += ';C:\\\\Program Files\\\\nodejs'; cd 'D:\\\\claudai_code\\\\claude_code_practice\\\\chor_police'; node server.js\"jjj)",
+      "PowerShell(netstat *)",
+      "PowerShell(Start-Process \"http://localhost:3000\")",
+      "PowerShell(Stop-Process *)",
+      "PowerShell(Start-Process \"http://192.168.1.37:3000\")",
+      "PowerShell(New-NetFirewallRule *)"
     ]
   }
 }

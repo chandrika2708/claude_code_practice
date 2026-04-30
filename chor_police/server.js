@@ -11,13 +11,16 @@ app.use(express.static('public'));
 const W = 900, H = 600;
 const RADIUS = 18;
 const SPEED = 4;
+const MAX_PLAYERS = 10;
 const JAIL = { x: 20, y: 20, w: 140, h: 130 };
 const FREE_ZONE = { x: W - 160, y: 20, w: 140, h: 130 };
 
 let players = {};
-let policeId = null;
+let policeIds = [];
 let gameStarted = false;
 let gameOverTimer = null;
+let countdownTimer = null;
+let countdown = 0;
 
 function dist(a, b) {
   return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
@@ -34,23 +37,49 @@ function randomSpawn() {
   };
 }
 
+function policeCount(total) {
+  if (total <= 4) return 1;
+  if (total <= 7) return 2;
+  return 3;
+}
+
+function startCountdown() {
+  if (countdownTimer || gameStarted) return;
+  countdown = 15;
+  io.emit('countdown', countdown);
+
+  countdownTimer = setInterval(() => {
+    countdown--;
+    io.emit('countdown', countdown);
+    if (countdown <= 0) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+      startGame();
+    }
+  }, 1000);
+}
+
 function startGame() {
   if (gameOverTimer) { clearTimeout(gameOverTimer); gameOverTimer = null; }
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+
   const ids = Object.keys(players);
   if (ids.length < 2) return;
 
-  policeId = ids[Math.floor(Math.random() * ids.length)];
+  const numPolice = policeCount(ids.length);
+  const shuffled = [...ids].sort(() => Math.random() - 0.5);
+  policeIds = shuffled.slice(0, numPolice);
   gameStarted = true;
 
   ids.forEach(id => {
     const pos = randomSpawn();
     players[id].x = pos.x;
     players[id].y = pos.y;
-    players[id].role = id === policeId ? 'police' : 'chor';
+    players[id].role = policeIds.includes(id) ? 'police' : 'chor';
     players[id].keys = {};
   });
 
-  io.emit('started', { policeId });
+  io.emit('started', { policeIds });
   broadcastState();
 }
 
@@ -60,24 +89,31 @@ function broadcastState() {
       id: p.id, name: p.name, x: p.x, y: p.y, role: p.role
     })),
     gameStarted,
-    policeId
+    policeIds,
+    countdown
   });
 }
 
 io.on('connection', socket => {
   socket.on('join', name => {
+    if (Object.keys(players).length >= MAX_PLAYERS) {
+      socket.emit('full');
+      return;
+    }
+
     const pos = randomSpawn();
     players[socket.id] = {
       id: socket.id,
       name: name.slice(0, 16),
       x: pos.x, y: pos.y,
-      role: 'waiting',
+      role: gameStarted ? 'chor' : 'waiting',
       keys: {}
     };
+
     broadcastState();
 
-    if (Object.keys(players).length >= 2 && !gameStarted) {
-      setTimeout(startGame, 1000);
+    if (Object.keys(players).length >= 2 && !gameStarted && !countdownTimer) {
+      startCountdown();
     }
   });
 
@@ -91,15 +127,26 @@ io.on('connection', socket => {
 
   socket.on('disconnect', () => {
     delete players[socket.id];
-    if (policeId === socket.id) {
-      gameStarted = false;
-      policeId = null;
+    policeIds = policeIds.filter(id => id !== socket.id);
+
+    const ids = Object.keys(players);
+
+    if (gameStarted && policeIds.length === 0) {
+      // No police left — pick a new one
+      if (ids.length > 0) {
+        const newPolice = ids[Math.floor(Math.random() * ids.length)];
+        policeIds = [newPolice];
+        players[newPolice].role = 'police';
+        io.emit('started', { policeIds });
+      }
     }
-    // Restart if enough players remain
-    if (gameStarted && Object.keys(players).length < 2) {
+
+    if (gameStarted && ids.length < 2) {
       gameStarted = false;
-      policeId = null;
+      policeIds = [];
+      if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
     }
+
     broadcastState();
   });
 });
@@ -107,9 +154,7 @@ io.on('connection', socket => {
 // Game loop at 60fps
 setInterval(() => {
   if (!gameStarted) return;
-
-  const police = players[policeId];
-  if (!police) return;
+  if (policeIds.length === 0) return;
 
   // Move players
   Object.values(players).forEach(p => {
@@ -120,21 +165,24 @@ setInterval(() => {
     if (p.keys['ArrowRight'] || p.keys['d']) p.x = Math.min(W - RADIUS, p.x + SPEED);
   });
 
-  // Police catches free Chor
-  Object.values(players).forEach(p => {
-    if (p.id === policeId || p.role !== 'chor') return;
-    if (dist(police, p) < RADIUS * 2) {
-      p.role = 'caught';
-      p.x = JAIL.x + 30 + Math.random() * 80;
-      p.y = JAIL.y + 30 + Math.random() * 70;
-    }
+  // Each police catches free Chor
+  policeIds.forEach(pid => {
+    const police = players[pid];
+    if (!police) return;
+    Object.values(players).forEach(p => {
+      if (policeIds.includes(p.id) || p.role !== 'chor') return;
+      if (dist(police, p) < RADIUS * 2) {
+        p.role = 'caught';
+        p.x = JAIL.x + 30 + Math.random() * 80;
+        p.y = JAIL.y + 30 + Math.random() * 70;
+      }
+    });
   });
 
-  // Free Chor rescues caught players by entering free zone
+  // Free Chor rescues caught players via free zone
   Object.values(players).forEach(p => {
-    if (p.id === policeId || p.role !== 'chor') return;
+    if (policeIds.includes(p.id) || p.role !== 'chor') return;
     if (inRect(p.x, p.y, FREE_ZONE)) {
-      // Move caught players out of jail
       Object.values(players).forEach(c => {
         if (c.role === 'caught') {
           const pos = randomSpawn();
@@ -152,7 +200,8 @@ setInterval(() => {
 
   if (freeChor.length === 0 && caught.length > 0) {
     gameStarted = false;
-    io.emit('gameover', { winner: players[policeId]?.name || 'Police' });
+    const policeNames = policeIds.map(id => players[id]?.name).filter(Boolean).join(' & ');
+    io.emit('gameover', { winner: policeNames || 'Police' });
     gameOverTimer = setTimeout(() => {
       if (Object.keys(players).length >= 2) startGame();
     }, 4000);
